@@ -13,7 +13,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
 import javax.inject.Singleton
-import android.util.Log
+import timber.log.Timber
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
 
 interface EventRepository {
     suspend fun logEvent(type: String, payload: String)
@@ -67,7 +68,7 @@ class EventRepositoryImpl @Inject constructor(
                 return@withContext true
             }
         } catch (e: Exception) {
-            Log.e("EventRepository", "Sync failed", e)
+            Timber.e(e, "Sync failed")
         }
         return@withContext false
     }
@@ -96,7 +97,7 @@ class EventRepositoryImpl @Inject constructor(
                 null
             }
         } catch (e: Exception) {
-            Log.e("EventRepository", "GetChatId failed", e)
+            Timber.e(e, "GetChatId failed")
             null
         }
     }
@@ -110,11 +111,11 @@ class EventRepositoryImpl @Inject constructor(
             if (response.isSuccessful) {
                 response.body()?.result ?: emptyList()
             } else {
-                Log.e("EventRepository", "Update poll failed: ${response.code()}")
+                Timber.e("Update poll failed: ${response.code()}")
                 emptyList()
             }
         } catch (e: Exception) {
-            Log.e("EventRepository", "Update poll error", e)
+            Timber.e(e, "Update poll error")
             emptyList()
         }
     }
@@ -127,11 +128,11 @@ class EventRepositoryImpl @Inject constructor(
             if (response.isSuccessful && response.body()?.ok == true) {
                 response.body()?.result
             } else {
-                Log.e("EventRepository", "Send failed: ${response.errorBody()?.string()}")
+                Timber.e("Send failed: ${response.errorBody()?.string()}")
                 null
             }
         } catch (e: Exception) {
-            Log.e("EventRepository", "Send error", e)
+            Timber.e(e, "Send error")
             null
         }
     }
@@ -143,7 +144,7 @@ class EventRepositoryImpl @Inject constructor(
             val response = api.editMessageText(token, chatId, messageId, text, "Markdown", replyMarkup)
             response.isSuccessful && response.body()?.ok == true
         } catch (e: Exception) {
-            Log.e("EventRepository", "Edit error", e)
+            Timber.e(e, "Edit error")
             false
         }
     }
@@ -164,17 +165,21 @@ class EventRepositoryImpl @Inject constructor(
         return prefs.getLong("last_dashboard_id", 0L)
     }
 
+    override fun getLastDashboardThreadId(): Int {
+        return prefs.getInt("last_dashboard_thread_id", 0)
+    }
+
     override suspend fun sendPhoto(fileId: java.io.File, caption: String?, threadId: Int?): Boolean {
         val (token, chatId) = getConfig()
         if (token.isEmpty() || chatId.isEmpty()) return false
         
         return try {
-            val requestFile = okhttp3.RequestBody.create(okhttp3.MediaType.parse("image/*"), fileId)
+            val requestFile = okhttp3.RequestBody.create("image/*".toMediaTypeOrNull(), fileId)
             val body = okhttp3.MultipartBody.Part.createFormData("photo", fileId.name, requestFile)
             val response = api.sendPhoto(token, chatId, body, caption, threadId)
             response.isSuccessful && response.body()?.ok == true
         } catch (e: Exception) {
-            Log.e("EventRepository", "Send photo error", e)
+            Timber.e(e, "Send photo error")
             false
         }
     }
@@ -184,12 +189,12 @@ class EventRepositoryImpl @Inject constructor(
         if (token.isEmpty() || chatId.isEmpty()) return false
         
         return try {
-            val requestFile = okhttp3.RequestBody.create(okhttp3.MediaType.parse("multipart/form-data"), file)
+            val requestFile = okhttp3.RequestBody.create("multipart/form-data".toMediaTypeOrNull(), file)
             val body = okhttp3.MultipartBody.Part.createFormData("document", file.name, requestFile)
             val response = api.sendDocument(token, chatId, body, caption, threadId)
             response.isSuccessful && response.body()?.ok == true
         } catch (e: Exception) {
-            Log.e("EventRepository", "Send file error", e)
+            Timber.e(e, "Send file error")
             false
         }
     }
@@ -202,7 +207,7 @@ class EventRepositoryImpl @Inject constructor(
             val response = api.deleteForumTopic(token, chatId, threadId)
             response.isSuccessful && response.body()?.ok == true
         } catch (e: Exception) {
-            Log.e("EventRepository", "Delete topic error", e)
+            Timber.e(e, "Delete topic error")
             false
         }
     }
