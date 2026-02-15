@@ -11,6 +11,8 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import com.example.telegramlistener.data.repo.EventRepository
 import com.example.telegramlistener.service.MonitorService
@@ -77,6 +79,7 @@ class MainActivity : ComponentActivity() {
         var isServiceRunning by remember { mutableStateOf(false) }
         var isBroadcastAvailable by remember { mutableStateOf(false) }
         var isConfigExpanded by remember { mutableStateOf(false) }
+        var isCheckingId by remember { mutableStateOf(false) }
 
         LaunchedEffect(Unit) {
             val (token, chat) = repository.getConfig()
@@ -213,6 +216,7 @@ class MainActivity : ComponentActivity() {
                 Row {
                      Button(
                         onClick = {
+                            isCheckingId = true
                             scope.launch {
                                 val id = repository.getChatId(botToken)
                                 if (id != null) {
@@ -223,9 +227,20 @@ class MainActivity : ComponentActivity() {
                                 }
                             }
                         },
+                        enabled = !isCheckingId,
                         modifier = Modifier.weight(1f).padding(end = 4.dp)
                     ) {
-                        Text("Auto-Detect ID")
+                        if (isCheckingId) {
+                            CircularProgressIndicator(
+                                modifier = Modifier
+                                    .size(24.dp)
+                                    .semantics { contentDescription = "Checking ID" },
+                                color = LocalContentColor.current,
+                                strokeWidth = 2.dp
+                            )
+                        } else {
+                            Text("Auto-Detect ID")
+                        }
                     }
                     Button(
                         onClick = {
