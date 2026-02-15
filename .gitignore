@@ -1,0 +1,15 @@
+# Android
+build/
+app/build/
+*.iml
+.gradle
+/local.properties
+/.idea/
+.DS_Store
+/captures
+.externalNativeBuild
+.cxx
+local.properties
+*.txt
+*.log
+temp_proj/
