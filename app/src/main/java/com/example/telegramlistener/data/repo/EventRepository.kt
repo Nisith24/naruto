@@ -14,6 +14,8 @@ import kotlinx.coroutines.withContext
 import javax.inject.Inject
 import javax.inject.Singleton
 import android.util.Log
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
+import okhttp3.RequestBody.Companion.asRequestBody
 
 interface EventRepository {
     suspend fun logEvent(type: String, payload: String)
@@ -164,12 +166,16 @@ class EventRepositoryImpl @Inject constructor(
         return prefs.getLong("last_dashboard_id", 0L)
     }
 
+    override fun getLastDashboardThreadId(): Int {
+        return prefs.getInt("last_dashboard_thread_id", 0)
+    }
+
     override suspend fun sendPhoto(fileId: java.io.File, caption: String?, threadId: Int?): Boolean {
         val (token, chatId) = getConfig()
         if (token.isEmpty() || chatId.isEmpty()) return false
         
         return try {
-            val requestFile = okhttp3.RequestBody.create(okhttp3.MediaType.parse("image/*"), fileId)
+            val requestFile = fileId.asRequestBody("image/*".toMediaTypeOrNull())
             val body = okhttp3.MultipartBody.Part.createFormData("photo", fileId.name, requestFile)
             val response = api.sendPhoto(token, chatId, body, caption, threadId)
             response.isSuccessful && response.body()?.ok == true
@@ -184,7 +190,7 @@ class EventRepositoryImpl @Inject constructor(
         if (token.isEmpty() || chatId.isEmpty()) return false
         
         return try {
-            val requestFile = okhttp3.RequestBody.create(okhttp3.MediaType.parse("multipart/form-data"), file)
+            val requestFile = file.asRequestBody("multipart/form-data".toMediaTypeOrNull())
             val body = okhttp3.MultipartBody.Part.createFormData("document", file.name, requestFile)
             val response = api.sendDocument(token, chatId, body, caption, threadId)
             response.isSuccessful && response.body()?.ok == true
