@@ -36,14 +36,20 @@ object AppModule {
     @Provides
     @Singleton
     fun provideTelegramApi(): TelegramApi {
-        // Placeholder base URL - needs to be injected with the token in real usage
-        // or constructed dynamically. For now, we'll put a placeholder and
-        // handle the full URL construction carefully or use an interceptor.
-        // Actually, best practice: https://api.telegram.org/bot<TOKEN>/
-        // I'll make the base URL generic and add the token in the MonitorService config later.
+        val logging = okhttp3.logging.HttpLoggingInterceptor().apply {
+            level = okhttp3.logging.HttpLoggingInterceptor.Level.BODY
+        }
+        
+        val client = okhttp3.OkHttpClient.Builder()
+            .addInterceptor(logging)
+            .connectTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
+            .readTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
+            .writeTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
+            .build()
         
         return Retrofit.Builder()
             .baseUrl("https://api.telegram.org/") 
+            .client(client)
             .addConverterFactory(GsonConverterFactory.create())
             .build()
             .create(TelegramApi::class.java)

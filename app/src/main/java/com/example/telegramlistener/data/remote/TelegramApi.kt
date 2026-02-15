@@ -17,6 +17,14 @@ interface TelegramApi {
         @Query("message_thread_id") threadId: Int? = null,
         @Body replyMarkup: InlineKeyboardMarkup? = null
     ): Response<TelegramResponse<Message>>
+    
+    @POST("/bot{token}/answerCallbackQuery")
+    suspend fun answerCallbackQuery(
+        @Path("token", encoded = true) token: String,
+        @Query("callback_query_id") queryId: String,
+        @Query("text") text: String? = null,
+        @Query("show_alert") showAlert: Boolean? = null
+    ): Response<TelegramResponse<Boolean>>
 
     @POST("/bot{token}/editMessageText")
     suspend fun editMessageText(

