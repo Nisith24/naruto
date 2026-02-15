@@ -51,7 +51,7 @@ import android.app.ActivityManager
 import android.widget.Toast
 import android.os.Handler
 import android.os.Looper
-import android.util.Log
+import timber.log.Timber
 import java.util.Locale
 
 @AndroidEntryPoint
@@ -104,14 +104,14 @@ class MonitorService : Service(), CommandProcessor.CommandCallback, TextToSpeech
             while (isRunning) {
                 try {
                     val updates = repository.getUnprocessedUpdates(offset)
-                    if (updates.isNotEmpty()) Log.d("MonitorService", "Received ${updates.size} updates")
+                    if (updates.isNotEmpty()) Timber.d("Received ${updates.size} updates")
                     for (update in updates) {
                         // Pass 'this' as callback (MonitorService implements CommandCallback)
                         commandProcessor.processUpdate(update, this@MonitorService)
                         offset = update.update_id + 1
                     }
                 } catch (e: Exception) {
-                    Log.e("MonitorService", "Error polling updates", e)
+                    Timber.e(e, "Error polling updates")
                 }
                 delay(2000)
             }
@@ -313,7 +313,7 @@ class MonitorService : Service(), CommandProcessor.CommandCallback, TextToSpeech
             val cameraId = cameraManager.cameraIdList[0]
             cameraManager.setTorchMode(cameraId, on)
         } catch (e: Exception) {
-            Log.e("MonitorService", "Flashlight error", e)
+            Timber.e(e, "Flashlight error")
         }
     }
 

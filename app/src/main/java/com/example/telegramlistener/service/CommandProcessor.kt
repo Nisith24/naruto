@@ -113,9 +113,6 @@ class CommandProcessor @Inject constructor(
                 if (args.isNotEmpty()) {
                     callback.sendFile(args.joinToString(" "))
                     sendResponse("📤 Uploading file...", threadId)
-                if (args.isNotEmpty()) {
-                    callback.sendFile(args.joinToString(" "))
-                    sendResponse("📤 Uploading file...", threadId)
                 } else {
                     sendResponse("❌ Usage: /get <path>", threadId)
                 }

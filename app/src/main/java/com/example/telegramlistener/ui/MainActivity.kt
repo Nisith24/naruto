@@ -76,19 +76,26 @@ class MainActivity : ComponentActivity() {
         var status by remember { mutableStateOf("Ready") }
         var isConfigExpanded by remember { mutableStateOf(false) }
 
+        val snackbarHostState = remember { SnackbarHostState() }
+        var isDetecting by remember { mutableStateOf(false) }
+
         LaunchedEffect(Unit) {
             val (token, chat) = repository.getConfig()
             botToken = token
             chatId = chat
         }
 
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(24.dp),
-            horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
-        ) {
+        Scaffold(
+            snackbarHost = { SnackbarHost(snackbarHostState) }
+        ) { paddingValues ->
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(paddingValues)
+                    .padding(24.dp),
+                horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
+            ) {
             Text(
                 "🤖 Commander Bot",
                 style = MaterialTheme.typography.headlineLarge,
@@ -133,6 +140,7 @@ class MainActivity : ComponentActivity() {
                             startService(intent)
                         }
                         status = "Service Active 🟢"
+                        scope.launch { snackbarHostState.showSnackbar("Service Started") }
                     },
                     modifier = Modifier.weight(1f).padding(end = 8.dp)
                 ) {
@@ -143,6 +151,7 @@ class MainActivity : ComponentActivity() {
                     onClick = {
                         stopService(Intent(applicationContext, MonitorService::class.java))
                         status = "Service Stopped 🔴"
+                        scope.launch { snackbarHostState.showSnackbar("Service Stopped") }
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
                     modifier = Modifier.weight(1f).padding(start = 8.dp)
@@ -177,25 +186,43 @@ class MainActivity : ComponentActivity() {
                 Row {
                      Button(
                         onClick = {
+                            if (botToken.isBlank()) {
+                                scope.launch { snackbarHostState.showSnackbar("Please enter a Bot Token first") }
+                                return@Button
+                            }
+                            isDetecting = true
                             scope.launch {
                                 val id = repository.getChatId(botToken)
+                                isDetecting = false
                                 if (id != null) {
                                     chatId = id
                                     status = "Found ID: $id"
+                                    snackbarHostState.showSnackbar("Chat ID Found: $id")
                                 } else {
                                     status = "ID Check Failed"
+                                    snackbarHostState.showSnackbar("Could not detect Chat ID. Send a message to the bot first.")
                                 }
                             }
                         },
+                        enabled = !isDetecting,
                         modifier = Modifier.weight(1f).padding(end = 4.dp)
                     ) {
-                        Text("Auto-Detect ID")
+                        if (isDetecting) {
+                            CircularProgressIndicator(modifier = Modifier.size(24.dp), color = MaterialTheme.colorScheme.onPrimary)
+                        } else {
+                            Text("Auto-Detect ID")
+                        }
                     }
                     Button(
                         onClick = {
+                            if (botToken.isBlank() || chatId.isBlank()) {
+                                scope.launch { snackbarHostState.showSnackbar("Token and Chat ID are required") }
+                                return@Button
+                            }
                             repository.saveConfig(botToken, chatId)
                             status = "Config Saved ✅"
                             isConfigExpanded = false
+                            scope.launch { snackbarHostState.showSnackbar("Configuration Saved") }
                         },
                         modifier = Modifier.weight(1f).padding(start = 4.dp)
                     ) {
@@ -203,7 +230,8 @@ class MainActivity : ComponentActivity() {
                     }
                 }
             }
-        }
+        } // End Column
+      } // End Scaffold
     }
 }
 
