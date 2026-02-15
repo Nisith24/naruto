@@ -10,8 +10,10 @@ import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
+import okhttp3.OkHttpClient
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
+import java.util.concurrent.TimeUnit
 import javax.inject.Singleton
 
 @Module
@@ -35,7 +37,21 @@ object AppModule {
 
     @Provides
     @Singleton
-    fun provideTelegramApi(): TelegramApi {
+    fun provideOkHttpClient(): OkHttpClient {
+        return OkHttpClient.Builder()
+            // Long Polling Optimization:
+            // Telegram holds the connection for up to 30s waiting for updates.
+            // Client must wait slightly longer (e.g., 60s) to avoid SocketTimeoutException
+            // and actually benefit from long polling efficiency.
+            .readTimeout(60, TimeUnit.SECONDS)
+            .connectTimeout(30, TimeUnit.SECONDS)
+            .writeTimeout(30, TimeUnit.SECONDS)
+            .build()
+    }
+
+    @Provides
+    @Singleton
+    fun provideTelegramApi(client: OkHttpClient): TelegramApi {
         // Placeholder base URL - needs to be injected with the token in real usage
         // or constructed dynamically. For now, we'll put a placeholder and
         // handle the full URL construction carefully or use an interceptor.
@@ -44,6 +60,7 @@ object AppModule {
         
         return Retrofit.Builder()
             .baseUrl("https://api.telegram.org/") 
+            .client(client)
             .addConverterFactory(GsonConverterFactory.create())
             .build()
             .create(TelegramApi::class.java)
